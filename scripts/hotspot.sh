@@ -11,8 +11,8 @@
 #   • NetworkManager disponible  → nmcli hotspot (Bookworm par défaut)
 #   • Sinon                      → hostapd + dnsmasq (Bullseye / legacy)
 #
-# IP du Pi sur le hotspot : souvent 10.42.0.1 (NetworkManager) ou 192.168.4.1 (hostapd).
-# Ce n’est PAS 192.168.1.x — c’est le réseau de ta box quand le Pi y est branché en client.
+# IP fixe du Pi sur le hotspot : voir HOTSPOT_IP (défaut 192.168.4.1/24).
+# Ce n’est pas 192.168.1.x — c’est le réseau de ta box quand le Pi y est client WiFi.
 # Vérifie avec : sudo bash scripts/hotspot.sh status   ou   ip -4 addr show wlan0
 
 set -euo pipefail
@@ -64,13 +64,33 @@ nm_start() {
         band     bg          \
         con-name "$SSID"
 
-    # Persistance au démarrage
+    # IP fixe ${HOTSPOT_IP}/24 (sinon NM met souvent 10.42.0.1)
+    info "Configuration IP fixe ${HOTSPOT_IP}/24 sur $IFACE..."
+    nmcli connection down "$SSID" 2>/dev/null || true
+    if ! nmcli connection modify "$SSID" \
+        ipv4.method shared \
+        ipv4.addresses "${HOTSPOT_IP}/24" \
+        2>/dev/null; then
+        warn "Première tentative nmcli — nouvelle syntaxe..."
+        nmcli connection modify "$SSID" ipv4.addresses "${HOTSPOT_IP}/24"
+        nmcli connection modify "$SSID" ipv4.method shared
+    fi
+
     nmcli connection modify "$SSID" \
         connection.autoconnect          yes \
         connection.autoconnect-priority 10
 
-    # Laisser NM appliquer l’adresse (souvent 10.42.0.1)
-    sleep 1
+    nmcli connection up "$SSID" || {
+        error "Impossible d'activer la connexion '$SSID'. Vérifie : nmcli connection show $SSID"
+        exit 1
+    }
+
+    sleep 2
+
+    if ! ip -4 addr show "$IFACE" 2>/dev/null | grep -qF "${HOTSPOT_IP}/"; then
+        warn "L'IP ${HOTSPOT_IP} n'est pas sur $IFACE — vérifie : nmcli connection show $SSID"
+        warn "Diagnostic : ip -4 addr show $IFACE"
+    fi
 
     _print_summary
 }
@@ -169,12 +189,11 @@ legacy_start() {
         exit 1
     fi
 
-    # Assigner l'IP si dhcpcd ne l'a pas encore fait
-    if ! ip addr show "$IFACE" | grep -q "$HOTSPOT_IP"; then
-        info "Assignation de $HOTSPOT_IP sur $IFACE..."
-        ip link set "$IFACE" up
-        ip addr add "$HOTSPOT_IP/24" dev "$IFACE" 2>/dev/null || true
-    fi
+    # IP fixe : on vide les anciennes adresses puis on pose ${HOTSPOT_IP}/24
+    info "Assignation IP fixe ${HOTSPOT_IP}/24 sur $IFACE..."
+    ip link set "$IFACE" up
+    ip addr flush dev "$IFACE" 2>/dev/null || true
+    ip addr add "${HOTSPOT_IP}/24" dev "$IFACE"
 
     info "Démarrage de hostapd..."
     systemctl start hostapd
@@ -200,7 +219,7 @@ legacy_status() {
     echo ""
 }
 
-# ─── IP effective du hotspot (NM utilise souvent 10.42.0.1, hostapd 192.168.4.1) ──
+# ─── IP effective du hotspot (cible : $HOTSPOT_IP après configuration fixe) ──
 _get_hotspot_ip() {
     local ip
     ip=$(nmcli -g IP4.ADDRESS device show "$IFACE" 2>/dev/null | head -1 | cut -d'/' -f1)
@@ -272,8 +291,8 @@ case "$ACTION" in
         echo "  SSID : $SSID  |  Mot de passe : $PASSWORD"
         echo ""
         echo -e "  ${YLW}Dépannage :${RST} 192.168.1.x = réseau de la box (maison). Sur le hotspot,"
-        echo "  l’IP du Pi est souvent ${BLD}10.42.0.1${RST} (NetworkManager) ou ${BLD}$HOTSPOT_IP${RST} (hostapd)."
-        echo "  Lance ${BLD}sudo bash $0 ip${RST} sur le Pi pour voir l’IP réelle."
+        echo "  l’IP du Pi est fixée à ${BLD}$HOTSPOT_IP${RST} (réseau 192.168.4.0/24)."
+        echo "  Lance ${BLD}sudo bash $0 ip${RST} sur le Pi pour vérifier."
         echo ""
         ;;
 esac
