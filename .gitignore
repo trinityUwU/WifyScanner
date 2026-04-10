@@ -11,6 +11,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/package-lock.json
 
+# Tuiles carte (cache local, potentiellement plusieurs centaines de Mo)
+tiles/
+logs/*.log
+
 # Env / secrets
 .env
 .env.*
