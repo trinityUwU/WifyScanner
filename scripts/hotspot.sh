@@ -10,6 +10,10 @@
 # Méthode auto-détectée :
 #   • NetworkManager disponible  → nmcli hotspot (Bookworm par défaut)
 #   • Sinon                      → hostapd + dnsmasq (Bullseye / legacy)
+#
+# IP du Pi sur le hotspot : souvent 10.42.0.1 (NetworkManager) ou 192.168.4.1 (hostapd).
+# Ce n’est PAS 192.168.1.x — c’est le réseau de ta box quand le Pi y est branché en client.
+# Vérifie avec : sudo bash scripts/hotspot.sh status   ou   ip -4 addr show wlan0
 
 set -euo pipefail
 
@@ -64,6 +68,9 @@ nm_start() {
     nmcli connection modify "$SSID" \
         connection.autoconnect          yes \
         connection.autoconnect-priority 10
+
+    # Laisser NM appliquer l’adresse (souvent 10.42.0.1)
+    sleep 1
 
     _print_summary
 }
@@ -193,21 +200,41 @@ legacy_status() {
     echo ""
 }
 
+# ─── IP effective du hotspot (NM utilise souvent 10.42.0.1, hostapd 192.168.4.1) ──
+_get_hotspot_ip() {
+    local ip
+    ip=$(nmcli -g IP4.ADDRESS device show "$IFACE" 2>/dev/null | head -1 | cut -d'/' -f1)
+    [[ -n "$ip" ]] && { echo "$ip"; return; }
+    ip=$(ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+    [[ -n "$ip" ]] && { echo "$ip"; return; }
+    echo "$HOTSPOT_IP"
+}
+
 # ─── Résumé affiché après start ───────────────────────────────────────────────
 _print_summary() {
     local ip
-    # Tenter de lire l'IP effective, sinon utiliser la valeur configurée
-    ip=$(ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1 || echo "$HOTSPOT_IP")
+    ip=$(_get_hotspot_ip)
     echo ""
     echo -e "${BLD}━━━ Hotspot démarré ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
     echo -e "  ${GRN}SSID         :${RST} ${BLD}$SSID${RST}"
     echo -e "  ${GRN}Mot de passe :${RST} ${BLD}$PASSWORD${RST}"
     echo -e "  ${GRN}IP du Pi     :${RST} ${BLD}$ip${RST}"
     echo ""
-    echo -e "  Depuis ton iPhone connecté au WiFi '${BLD}$SSID${RST}' :"
+    echo -e "  ${YLW}→ Connecte ton téléphone au WiFi « $SSID », puis utilise cette IP (pas 192.168.1.x).${RST}"
+    echo ""
+    echo -e "  Depuis le téléphone sur le WiFi '${BLD}$SSID${RST}' :"
     echo -e "    SSH  : ${BLD}ssh pi@$ip${RST}"
     echo -e "    Web  : ${BLD}http://$ip:3780${RST}"
     echo -e "${BLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+    echo ""
+}
+
+show_ip_cmd() {
+    echo ""
+    echo -e "${BLD}── Adresses IPv4 de $IFACE ──────────────────────${RST}"
+    ip -4 addr show "$IFACE" 2>/dev/null || echo "  (interface absente)"
+    echo ""
+    echo -e "  IP à utiliser pour SSH / navigateur (hotspot actif) : ${BLD}$(_get_hotspot_ip)${RST}"
     echo ""
 }
 
@@ -229,6 +256,9 @@ case "$ACTION" in
         if use_nm; then nm_stop;        else legacy_stop;   fi ;;
     status)
         if use_nm; then nm_status;      else legacy_status; fi ;;
+    ip|show-ip)
+        show_ip_cmd
+        ;;
     help|--help|-h|*)
         echo ""
         echo -e "${BLD}Usage :${RST} sudo bash $0 [commande]"
@@ -237,8 +267,13 @@ case "$ACTION" in
         echo "  start     Démarre le hotspot WiFi '$SSID'"
         echo "  stop      Arrête le hotspot"
         echo "  status    Affiche l'état"
+        echo "  ip        Affiche les adresses IPv4 de $IFACE (IP à utiliser pour SSH / web)"
         echo ""
-        echo "  SSID : $SSID  |  Mot de passe : $PASSWORD  |  IP : $HOTSPOT_IP"
+        echo "  SSID : $SSID  |  Mot de passe : $PASSWORD"
+        echo ""
+        echo -e "  ${YLW}Dépannage :${RST} 192.168.1.x = réseau de la box (maison). Sur le hotspot,"
+        echo "  l’IP du Pi est souvent ${BLD}10.42.0.1${RST} (NetworkManager) ou ${BLD}$HOTSPOT_IP${RST} (hostapd)."
+        echo "  Lance ${BLD}sudo bash $0 ip${RST} sur le Pi pour voir l’IP réelle."
         echo ""
         ;;
 esac
