@@ -40,21 +40,30 @@ _skip = 0
 _err = 0
 
 # IPs résolues une seule fois avant le pool de threads (évite DNS storm)
-_cdn_ips: dict[str, str] = {}
+_dns_cache: dict[str, str] = {}  # hostname → IP
+_original_getaddrinfo = socket.getaddrinfo
+
+
+def _patched_getaddrinfo(host, port, *args, **kwargs):
+    """Remplace getaddrinfo pour servir les IPs en cache sans appel DNS."""
+    if host in _dns_cache:
+        return _original_getaddrinfo(_dns_cache[host], port, *args, **kwargs)
+    return _original_getaddrinfo(host, port, *args, **kwargs)
 
 
 def _resolve_cdn_hosts(template: str) -> None:
-    """Résout chaque sous-domaine CDN une seule fois et met en cache les IPs."""
+    """Résout chaque sous-domaine CDN une seule fois, patch socket.getaddrinfo."""
     for h in CDN_HOSTS:
-        hostname = template.format(s=h, z=0, x=0, y=0)
-        # extrait seulement le hostname de l'URL
-        hostname = hostname.split("//")[1].split("/")[0]
+        url = template.format(s=h, z=0, x=0, y=0)
+        hostname = url.split("//")[1].split("/")[0]
         try:
             ip = socket.gethostbyname(hostname)
-            _cdn_ips[hostname] = ip
+            _dns_cache[hostname] = ip
         except socket.gaierror as e:
             print(f"[!] DNS échoué pour {hostname}: {e}", file=sys.stderr)
             sys.exit(1)
+    # Patch global : tous les threads (urllib inclus) utilisent les IPs en cache
+    socket.getaddrinfo = _patched_getaddrinfo
 
 
 def _cdn_url(template: str, z: int, x: int, y: int) -> str:
