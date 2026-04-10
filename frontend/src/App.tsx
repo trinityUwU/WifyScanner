@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import ControlPanel from './ControlPanel'
+import GpsView from './GpsView'
 import './App.css'
 
 const API = '/api'
@@ -378,7 +379,7 @@ function NetworkCard({
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [view, setView] = useState<'heatmap' | 'control'>('heatmap')
+  const [view, setView] = useState<'heatmap' | 'control' | 'gps'>('heatmap')
   const [liveHeatmap, setLiveHeatmap] = useState(true)
   /** Recentrer la carte sur l’emprise des données seulement au changement de filtre (pas en boucle). */
   const [autoFitDataBounds, setAutoFitDataBounds] = useState(true)
@@ -421,13 +422,18 @@ export default function App() {
 
   const selectedNetwork = networks.find(n => n.bssid === selectedBssid)
 
+  const navBar = (active: 'heatmap' | 'control' | 'gps') => (
+    <nav className="app-nav">
+      <button type="button" className={`nav-tab${active === 'heatmap'  ? ' nav-tab--active' : ''}`} onClick={() => setView('heatmap')}>Heatmap</button>
+      <button type="button" className={`nav-tab${active === 'gps'     ? ' nav-tab--active' : ''}`} onClick={() => setView('gps')}>GPS</button>
+      <button type="button" className={`nav-tab${active === 'control' ? ' nav-tab--active' : ''}`} onClick={() => setView('control')}>Contrôle</button>
+    </nav>
+  )
+
   if (view === 'control') {
     return (
       <div className="app-shell">
-        <nav className="app-nav">
-          <button type="button" className="nav-tab" onClick={() => setView('heatmap')}>Heatmap</button>
-          <button type="button" className="nav-tab nav-tab--active">Contrôle</button>
-        </nav>
+        {navBar('control')}
         <div className="control-scroll">
           <ControlPanel />
         </div>
@@ -435,11 +441,20 @@ export default function App() {
     )
   }
 
+  if (view === 'gps') {
+    return (
+      <div className="app-shell">
+        {navBar('gps')}
+        <GpsView />
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
-      <nav className="app-nav">
-        <button type="button" className="nav-tab nav-tab--active">Heatmap</button>
-        <button type="button" className="nav-tab" onClick={() => setView('control')}>Contrôle</button>
+      {navBar('heatmap')}
+      <div className="app-nav app-nav--sub">
+
         <label className="nav-live">
           <input type="checkbox" checked={liveHeatmap} onChange={e => setLiveHeatmap(e.target.checked)} />
           Temps réel (~3s)
@@ -457,7 +472,7 @@ export default function App() {
             {apLocations.length} AP localisé{apLocations.length > 1 ? 's' : ''}
           </span>
         )}
-      </nav>
+      </div>
       <div className="app-layout">
       {/* ── Sidebar ── */}
       <aside className="sidebar">

@@ -279,6 +279,96 @@ def gps_status() -> dict[str, Any]:
     }
 
 
+@router.get("/gps/live")
+def gps_live() -> dict[str, Any]:
+    """
+    Snapshot GPS temps réel : dernier TPV (position, vitesse, précision) + dernier SKY
+    (DOP, satellites). Prévu pour un polling court (~2 s) côté frontend.
+    Renvoie {"tpv": {...}, "sky": {...}, "satellites": [...], "error": null | str}.
+    """
+    gpspipe_bin = _which("gpspipe")
+    if not gpspipe_bin:
+        return {"tpv": None, "sky": None, "satellites": [], "error": "gpspipe introuvable"}
+
+    try:
+        r = subprocess.run(
+            [gpspipe_bin, "-w", "-n", "30"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {"tpv": None, "sky": None, "satellites": [], "error": "gpspipe timeout"}
+    except FileNotFoundError as e:
+        return {"tpv": None, "sky": None, "satellites": [], "error": str(e)}
+
+    tpv: Optional[dict[str, Any]] = None
+    sky: Optional[dict[str, Any]] = None
+
+    for line in r.stdout.splitlines():
+        try:
+            j = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        cls = j.get("class")
+        if cls == "TPV":
+            mode = int(j.get("mode") or 0)
+            if tpv is None or mode > int(tpv.get("mode") or 0):
+                tpv = j
+        elif cls == "SKY":
+            if sky is None or len(j.get("satellites") or []) > len((sky or {}).get("satellites") or []):
+                sky = j
+
+    sats = []
+    if sky and sky.get("satellites"):
+        for s in sky["satellites"]:
+            gnssid = s.get("gnssid", 0)
+            constellation = {0: "GP", 1: "SB", 2: "GA", 3: "BD", 5: "QZ", 6: "GL"}.get(gnssid, "??")
+            sats.append({
+                "constellation": constellation,
+                "prn": s.get("PRN"),
+                "el": s.get("el"),
+                "az": s.get("az"),
+                "ss": s.get("ss"),
+                "used": s.get("used", False),
+            })
+        sats.sort(key=lambda x: (not x["used"], -(x["ss"] or 0)))
+
+    tpv_out: Optional[dict[str, Any]] = None
+    if tpv:
+        tpv_out = {
+            "mode": tpv.get("mode"),
+            "time": tpv.get("time"),
+            "lat": tpv.get("lat"),
+            "lon": tpv.get("lon"),
+            "altHAE": tpv.get("altHAE"),
+            "altMSL": tpv.get("altMSL") or tpv.get("alt"),
+            "speed": tpv.get("speed"),
+            "track": tpv.get("track"),
+            "climb": tpv.get("climb"),
+            "epx": tpv.get("epx"),
+            "epy": tpv.get("epy"),
+            "epv": tpv.get("epv"),
+            "eph": tpv.get("eph"),
+            "sep": tpv.get("sep"),
+            "leapseconds": tpv.get("leapseconds"),
+        }
+
+    sky_out: Optional[dict[str, Any]] = None
+    if sky:
+        sky_out = {
+            "nSat": sky.get("nSat"),
+            "uSat": sky.get("uSat"),
+            "hdop": sky.get("hdop"),
+            "vdop": sky.get("vdop"),
+            "pdop": sky.get("pdop"),
+            "tdop": sky.get("tdop"),
+            "xdop": sky.get("xdop"),
+            "ydop": sky.get("ydop"),
+            "gdop": sky.get("gdop"),
+        }
+
+    return {"tpv": tpv_out, "sky": sky_out, "satellites": sats, "error": None}
+
+
 @router.get("/preflight")
 def preflight() -> dict[str, Any]:
     missing: list[str] = []
