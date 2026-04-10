@@ -384,6 +384,7 @@ export default function App() {
   /** Recentrer la carte sur l’emprise des données seulement au changement de filtre (pas en boucle). */
   const [autoFitDataBounds, setAutoFitDataBounds] = useState(true)
   const [showApMarkers, setShowApMarkers] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [networks, setNetworks] = useState<Network[]>([])
   const [stats, setStats] = useState<Stats>({ total_points: 0, unique_networks: 0, bounds: null })
   const [apLocations, setApLocations] = useState<ApLocation[]>([])
@@ -474,8 +475,11 @@ export default function App() {
         )}
       </div>
       <div className="app-layout">
-      {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      {/* ── Sidebar / drawer ── */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+      <aside className={`sidebar${sidebarOpen ? ' sidebar--open' : ''}`}>
         {/* Header */}
         <div className="sidebar-header">
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -593,6 +597,15 @@ export default function App() {
             />
           )}
           <LocateButton />
+        {/* Bouton toggle sidebar (visible uniquement mobile) */}
+        <button
+          type="button"
+          className="map-btn map-btn--networks"
+          onClick={() => setSidebarOpen(o => !o)}
+          title="Réseaux"
+        >
+          ☰
+        </button>
         </MapContainer>
 
         {/* Légende */}

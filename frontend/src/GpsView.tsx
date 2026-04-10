@@ -166,7 +166,7 @@ function SatPanel({ satellites, sky }: { satellites: Satellite[]; sky: SkyData |
       {satellites.length === 0 ? (
         <p className="gps-empty">Aucune donnée satellite</p>
       ) : (
-        <table className="gps-sat-table">
+        <div className="gps-sat-scroll"><table className="gps-sat-table">
           <thead>
             <tr>
               <th>Sys</th>
@@ -195,7 +195,7 @@ function SatPanel({ satellites, sky }: { satellites: Satellite[]; sky: SkyData |
               </tr>
             ))}
           </tbody>
-        </table>
+          </table></div>
       )}
     </div>
   )
