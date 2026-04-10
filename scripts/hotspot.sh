@@ -15,7 +15,7 @@ set -euo pipefail
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 SSID="WifyScanner"
-PASSWORD="chris"
+PASSWORD="chris123"
 IFACE="wlan0"
 HOTSPOT_IP="192.168.4.1"
 DHCP_START="192.168.4.10"
