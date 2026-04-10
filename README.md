@@ -95,6 +95,13 @@ Le script **`gps_diagnose.py`** affiche aussi des lignes **`SKY`** avec `satelli
 
 Puis ouvrir **`http://<IP>:3780`** (ou le port affiché par Vite) depuis le PC ou le téléphone.
 
+**Script tout-en-un** (API + frontend, optionnellement le collecteur) :
+
+```bash
+./start.sh              # ou : sudo ./start.sh wlan1mon
+./stop.sh               # arrête tout (équivalent : ./start.sh stop)
+```
+
 ## Panneau « Contrôle » (interface web)
 
 Dans l’app : onglet **Contrôle**.
