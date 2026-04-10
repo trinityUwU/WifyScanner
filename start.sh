@@ -4,7 +4,7 @@
 #   interface_wifi : interface en mode monitor (ex. wlan1mon). Optionnel.
 #                   Si fourni, le collecteur est aussi lancé (nécessite root).
 #
-# Arrêt propre : ./start.sh stop
+# Arrêt propre : ./stop.sh   ou   ./start.sh stop
 # Logs         : logs/api.log, logs/frontend.log, logs/collector.log
 #
 # Port UI (défaut 3780) : CYBERALPHA_WEB_PORT=4000 ./start.sh
@@ -139,6 +139,6 @@ echo -e "  Logs : tail -f $LOG_DIR/api.log"
 echo -e "         tail -f $LOG_DIR/frontend.log"
 [ -n "$WIFI_IFACE" ] && echo -e "         tail -f $LOG_DIR/collector.log"
 echo ""
-echo -e "  Arrêt : ${BLD}./start.sh stop${RST}"
+echo -e "  Arrêt : ${BLD}./stop.sh${RST}  ou  ${BLD}./start.sh stop${RST}"
 echo -e "${BLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
 echo ""
