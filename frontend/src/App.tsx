@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import ControlPanel from './ControlPanel'
@@ -29,6 +29,91 @@ interface Stats {
 }
 
 type HeatPoint = [number, number, number] // lat, lng, intensity
+
+interface ApLocation {
+  bssid: string
+  ssid: string
+  encryption: string
+  lat: number
+  lng: number
+  method: string
+  points_used: number
+  best_rssi: number
+  confidence: number
+  centroid_lat?: number
+  centroid_lng?: number
+}
+
+// ─── AP Location Markers ──────────────────────────────────────────────────────
+
+function encryptionColor(enc: string): string {
+  if (enc === 'OPEN') return '#ff4d6a'
+  if (enc.includes('WPA2')) return '#00d88a'
+  return '#f0a030'
+}
+
+function ApMarkersLayer({ locations, selectedBssid }: {
+  locations: ApLocation[]
+  selectedBssid: string | null
+}) {
+  const map = useMap()
+  const layerRef = useRef<L.LayerGroup | null>(null)
+
+  useEffect(() => {
+    if (layerRef.current) {
+      layerRef.current.clearLayers()
+    } else {
+      layerRef.current = L.layerGroup().addTo(map)
+    }
+
+    locations.forEach(ap => {
+      const isSelected = ap.bssid === selectedBssid
+      const color = encryptionColor(ap.encryption)
+      const size = isSelected ? 14 : 10
+      const opacity = isSelected ? 1 : 0.75
+
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width:${size}px;height:${size}px;
+          border-radius:50%;
+          background:${color};
+          border:${isSelected ? '3px solid white' : '2px solid rgba(255,255,255,0.5)'};
+          box-shadow:0 0 ${isSelected ? '10px' : '4px'} ${color};
+          opacity:${opacity};
+          transform:translate(-50%,-50%);
+        "></div>`,
+        iconAnchor: [0, 0],
+      })
+
+      const confStr = `${Math.round(ap.confidence * 100)}%`
+      const popup = `
+        <div style="font-family:monospace;font-size:12px;min-width:200px">
+          <b style="color:${color}">${ap.ssid || '<hidden>'}</b><br/>
+          <span style="color:#999">${ap.bssid}</span><br/>
+          <span style="color:#ccc">${ap.encryption}</span><br/>
+          <br/>
+          <b>Position estimée</b><br/>
+          ${ap.lat.toFixed(6)}, ${ap.lng.toFixed(6)}<br/>
+          Méthode : ${ap.method}<br/>
+          RSSI max : ${ap.best_rssi} dBm<br/>
+          Points distincts : ${ap.points_used}<br/>
+          Confiance : ${confStr}
+        </div>
+      `
+
+      L.marker([ap.lat, ap.lng], { icon })
+        .bindPopup(popup)
+        .addTo(layerRef.current!)
+    })
+
+    return () => {
+      layerRef.current?.clearLayers()
+    }
+  }, [locations, selectedBssid, map])
+
+  return null
+}
 
 // ─── Heatmap Layer ────────────────────────────────────────────────────────────
 
@@ -181,8 +266,10 @@ function NetworkCard({
 export default function App() {
   const [view, setView] = useState<'heatmap' | 'control'>('heatmap')
   const [liveHeatmap, setLiveHeatmap] = useState(true)
+  const [showApMarkers, setShowApMarkers] = useState(true)
   const [networks, setNetworks] = useState<Network[]>([])
   const [stats, setStats] = useState<Stats>({ total_points: 0, unique_networks: 0, bounds: null })
+  const [apLocations, setApLocations] = useState<ApLocation[]>([])
   const [selectedBssid, setSelectedBssid] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'samples' | 'rssi'>('samples')
@@ -190,12 +277,14 @@ export default function App() {
   const pollMs = view === 'heatmap' && liveHeatmap ? POLL_LIVE : POLL_SLOW
 
   const fetchData = useCallback(async () => {
-    const [nets, st] = await Promise.all([
+    const [nets, st, locs] = await Promise.all([
       fetch(`${API}/networks`).then(r => r.json()),
       fetch(`${API}/stats`).then(r => r.json()),
+      fetch(`${API}/networks/locate?min_points=3`).then(r => r.ok ? r.json() : []),
     ])
     setNetworks(nets)
     setStats(st)
+    setApLocations(locs as ApLocation[])
   }, [])
 
   useEffect(() => {
@@ -239,6 +328,15 @@ export default function App() {
           <input type="checkbox" checked={liveHeatmap} onChange={e => setLiveHeatmap(e.target.checked)} />
           Temps réel (~3s)
         </label>
+        <label className="nav-live">
+          <input type="checkbox" checked={showApMarkers} onChange={e => setShowApMarkers(e.target.checked)} />
+          Positions AP
+        </label>
+        {apLocations.length > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>
+            {apLocations.length} AP localisé{apLocations.length > 1 ? 's' : ''}
+          </span>
+        )}
       </nav>
       <div className="app-layout">
       {/* ── Sidebar ── */}
@@ -348,6 +446,12 @@ export default function App() {
             maxZoom={19}
           />
           <HeatmapLayer bssid={selectedBssid} bounds={stats.bounds} pollInterval={pollMs} />
+          {showApMarkers && (
+            <ApMarkersLayer
+              locations={selectedBssid ? apLocations.filter(a => a.bssid === selectedBssid) : apLocations}
+              selectedBssid={selectedBssid}
+            />
+          )}
         </MapContainer>
 
         {/* Légende */}
