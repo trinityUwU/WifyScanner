@@ -4,7 +4,12 @@
 
 set -euo pipefail
 echo "=== Ports en écoute (3780 UI, 8001 API) ==="
-ss -tlnp 2>/dev/null | grep -E ':3780|:8001' || echo "(rien — lance ./start.sh)"
+if ! ss -tln 2>/dev/null | grep -q ':3780'; then
+  echo "(port 3780 absent — UI Vite pas démarrée ou crash)"
+  echo "  → ./stop.sh && ./start.sh"
+  echo "  → tail -40 logs/frontend.log"
+fi
+ss -tlnp 2>/dev/null | grep -E ':3780|:8001' || true
 echo ""
 echo "=== Test local (depuis le Pi) ==="
 curl -sS -o /dev/null -w "HTTP %{http_code} sur http://127.0.0.1:3780\n" --connect-timeout 2 http://127.0.0.1:3780/ || echo "Échec : UI pas démarrée ou crash (voir logs/frontend.log)"

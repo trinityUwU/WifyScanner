@@ -94,14 +94,29 @@ else
   echo -e "  ${GRN}✓ API démarrée${RST}  →  http://0.0.0.0:$API_PORT  (PID $(cat $PID_API))"
 fi
 
-# ── Frontend ──────────────────────────────────────────────────────────────────
+# ── Frontend (Vite) — cd explicite : --prefix peut échouer sur certains Pi/npm ─
 if is_running "$PID_FRONT"; then
   echo -e "  ${YLW}Frontend déjà en cours (PID $(cat $PID_FRONT))${RST}"
 else
-  nohup npm run dev --prefix "$FRONTEND_DIR" -- --host 0.0.0.0 \
-    > "$LOG_DIR/frontend.log" 2>&1 &
+  (
+    cd "$FRONTEND_DIR"
+    export CYBERALPHA_WEB_PORT="$WEB_PORT"
+    exec npm run dev -- --host 0.0.0.0
+  ) > "$LOG_DIR/frontend.log" 2>&1 &
   echo $! > "$PID_FRONT"
-  echo -e "  ${GRN}✓ Frontend démarré${RST}  (PID $(cat $PID_FRONT))"
+  echo -e "  ${GRN}✓ Frontend lancé${RST}  (PID $(cat $PID_FRONT), port $WEB_PORT)"
+  # Attendre que Vite écoute (sinon npm --prefix / race nohup)
+  for _ in $(seq 1 15); do
+    if ss -tln 2>/dev/null | grep -qE ":${WEB_PORT}\b"; then
+      echo -e "  ${GRN}✓ Port $WEB_PORT ouvert (Vite prêt)${RST}"
+      break
+    fi
+    sleep 1
+  done
+  if ! ss -tln 2>/dev/null | grep -qE ":${WEB_PORT}\b"; then
+    echo -e "  ${RED}[!] Rien n’écoute sur $WEB_PORT — voir logs/frontend.log :${RST}"
+    tail -20 "$LOG_DIR/frontend.log" 2>/dev/null || true
+  fi
 fi
 
 # ── Collecteur (optionnel) ─────────────────────────────────────────────────────
