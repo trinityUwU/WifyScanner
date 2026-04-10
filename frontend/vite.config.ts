@@ -10,6 +10,8 @@ const WEB_PORT = (() => {
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Obligatoire pour accès depuis le téléphone / autre machine (sinon 127.0.0.1 seulement)
+    host: '0.0.0.0',
     port: WEB_PORT,
     proxy: {
       '/api': {
@@ -21,6 +23,6 @@ export default defineConfig({
   },
   preview: {
     port: WEB_PORT,
-    host: true,
+    host: '0.0.0.0',
   },
 })

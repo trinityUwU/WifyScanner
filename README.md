@@ -93,7 +93,8 @@ Le script **`gps_diagnose.py`** affiche aussi des lignes **`SKY`** avec `satelli
    cd frontend && npm run dev -- --host 0.0.0.0
    ```
 
-Puis ouvrir **`http://<IP>:3780`** (ou le port affiché par Vite) depuis le PC ou le téléphone.
+Puis ouvrir **`http://<IP>:3780`** (ou le port affiché par Vite) depuis le PC ou le téléphone.  
+Le serveur Vite est configuré pour écouter sur **`0.0.0.0`** (toutes les interfaces). Si l’accès réseau échoue, vérifie le pare-feu : `sudo ufw allow 3780/tcp` (ou équivalent).
 
 **Script tout-en-un** (API + frontend, optionnellement le collecteur) :
 
