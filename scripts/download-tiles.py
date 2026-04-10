@@ -20,6 +20,7 @@ Options :
 
 import argparse
 import math
+import socket
 import sys
 import time
 import urllib.request
@@ -37,6 +38,23 @@ _counter_lock = Lock()
 _done = 0
 _skip = 0
 _err = 0
+
+# IPs résolues une seule fois avant le pool de threads (évite DNS storm)
+_cdn_ips: dict[str, str] = {}
+
+
+def _resolve_cdn_hosts(template: str) -> None:
+    """Résout chaque sous-domaine CDN une seule fois et met en cache les IPs."""
+    for h in CDN_HOSTS:
+        hostname = template.format(s=h, z=0, x=0, y=0)
+        # extrait seulement le hostname de l'URL
+        hostname = hostname.split("//")[1].split("/")[0]
+        try:
+            ip = socket.gethostbyname(hostname)
+            _cdn_ips[hostname] = ip
+        except socket.gaierror as e:
+            print(f"[!] DNS échoué pour {hostname}: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def _cdn_url(template: str, z: int, x: int, y: int) -> str:
@@ -75,8 +93,9 @@ def tile_jobs(lat_min: float, lon_min: float, lat_max: float, lon_max: float,
     return jobs
 
 
-def download_one(job: tuple[int, int, int], out_dir: Path, url_tpl: str) -> str:
-    """Télécharge une tuile. Retourne 'done', 'skip' ou 'err:<msg>'."""
+def download_one(job: tuple[int, int, int], out_dir: Path, url_tpl: str,
+                 retries: int = 3) -> str:
+    """Télécharge une tuile avec retry. Retourne 'done', 'skip' ou 'err:<msg>'."""
     global _done, _skip, _err
     z, x, y = job
     tile_path = out_dir / str(z) / str(x) / f"{y}.png"
@@ -85,19 +104,24 @@ def download_one(job: tuple[int, int, int], out_dir: Path, url_tpl: str) -> str:
             _skip += 1
         return "skip"
     url = _cdn_url(url_tpl, z, x, y)
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CyberAlpha/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = resp.read()
-        tile_path.parent.mkdir(parents=True, exist_ok=True)
-        tile_path.write_bytes(data)
-        with _counter_lock:
-            _done += 1
-        return "done"
-    except Exception as e:
-        with _counter_lock:
-            _err += 1
-        return f"err:{e}"
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CyberAlpha/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read()
+            tile_path.parent.mkdir(parents=True, exist_ok=True)
+            tile_path.write_bytes(data)
+            with _counter_lock:
+                _done += 1
+            return "done"
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(0.5 * (attempt + 1))  # back-off: 0.5s, 1s
+    with _counter_lock:
+        _err += 1
+    return f"err:{last_err}"
 
 
 def download_bbox(lat_min: float, lon_min: float, lat_max: float, lon_max: float,
@@ -113,6 +137,12 @@ def download_bbox(lat_min: float, lon_min: float, lat_max: float, lon_max: float
         return
 
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Résolution DNS avant de démarrer le pool (évite le DNS storm avec N threads)
+    print("Résolution DNS... ", end="", flush=True)
+    _resolve_cdn_hosts(url_tpl)
+    print("OK")
+
     t0 = time.time()
     last_report = [0]
 
