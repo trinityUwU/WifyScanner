@@ -135,32 +135,23 @@ function LocateButton() {
   const circleRef = useRef<L.Circle | null>(null)
   const watchRef = useRef<number | null>(null)
   const [state, setState] = useState<LocateState>('idle')
-  /** Si vrai, chaque mise à jour GPS recentre la carte ; sinon seul le marqueur bouge. */
-  const [followMap, setFollowMap] = useState(false)
-  const followMapRef = useRef(false)
-  followMapRef.current = followMap
 
-  const stopWatch = () => {
+  const stop = () => {
     if (watchRef.current !== null) {
       navigator.geolocation.clearWatch(watchRef.current)
       watchRef.current = null
     }
     markerRef.current?.remove(); markerRef.current = null
     circleRef.current?.remove(); circleRef.current = null
-    setFollowMap(false)
   }
 
-  const onPos = useCallback((pos: GeolocationPosition) => {
+  const updateMarker = useCallback((pos: GeolocationPosition) => {
     const { latitude: lat, longitude: lng, accuracy } = pos.coords
     setState('active')
 
     if (!markerRef.current) {
       markerRef.current = L.circleMarker([lat, lng], {
-        radius: 8,
-        color: '#fff',
-        fillColor: '#4a9eff',
-        fillOpacity: 1,
-        weight: 2,
+        radius: 8, color: '#fff', fillColor: '#4a9eff', fillOpacity: 1, weight: 2,
       }).addTo(map)
     } else {
       markerRef.current.setLatLng([lat, lng])
@@ -168,24 +159,16 @@ function LocateButton() {
 
     if (!circleRef.current) {
       circleRef.current = L.circle([lat, lng], {
-        radius: accuracy,
-        color: '#4a9eff',
-        fillColor: '#4a9eff',
-        fillOpacity: 0.08,
-        weight: 1,
+        radius: accuracy, color: '#4a9eff', fillColor: '#4a9eff', fillOpacity: 0.08, weight: 1,
       }).addTo(map)
     } else {
       circleRef.current.setLatLng([lat, lng]).setRadius(accuracy)
     }
-
-    if (followMapRef.current) {
-      map.setView([lat, lng], map.getZoom(), { animate: true, duration: 0.25 })
-    }
   }, [map])
 
   const onClick = () => {
-    if (state === 'active') {
-      stopWatch()
+    if (state === 'active' || state === 'error') {
+      stop()
       setState('idle')
       return
     }
@@ -196,13 +179,12 @@ function LocateButton() {
     setState('loading')
     navigator.geolocation.getCurrentPosition(
       pos => {
-        onPos(pos)
+        updateMarker(pos)
         map.flyTo([pos.coords.latitude, pos.coords.longitude], Math.max(map.getZoom(), 17), {
           duration: 1.2,
         })
-        watchRef.current = navigator.geolocation.watchPosition(onPos, () => {}, {
-          enableHighAccuracy: true,
-          maximumAge: 2000,
+        watchRef.current = navigator.geolocation.watchPosition(updateMarker, () => {}, {
+          enableHighAccuracy: true, maximumAge: 2000,
         })
       },
       () => setState('error'),
@@ -210,54 +192,22 @@ function LocateButton() {
     )
   }
 
-  useEffect(() => () => stopWatch(), [])
+  useEffect(() => () => stop(), [])
 
-  const icons: Record<LocateState, string> = {
-    idle:    '◎',
-    loading: '…',
-    active:  '◉',
-    error:   '✕',
-  }
-  const colors: Record<LocateState, string> = {
-    idle:    'var(--text)',
-    loading: 'var(--text-muted)',
-    active:  'var(--blue)',
-    error:   'var(--red)',
-  }
-  const titles: Record<LocateState, string> = {
-    idle:    'Me localiser',
-    loading: 'Localisation…',
-    active:  'Arrêter le suivi GPS',
-    error:   'Géolocalisation indisponible',
-  }
+  const icon  = state === 'idle' ? '◎' : state === 'loading' ? '…' : state === 'active' ? '◉' : '✕'
+  const color = state === 'idle' ? 'var(--text)' : state === 'loading' ? 'var(--text-muted)' : state === 'active' ? 'var(--blue)' : 'var(--red)'
+  const title = state === 'idle' ? 'Me localiser' : state === 'loading' ? 'Localisation…' : state === 'active' ? 'Arrêter la localisation' : 'Erreur GPS — cliquer pour réessayer'
 
   return (
-    <div className="map-locate-stack">
-      {state === 'active' && (
-        <button
-          type="button"
-          onClick={() => setFollowMap(f => !f)}
-          title={
-            followMap
-              ? 'Suivi carte actif — cliquer pour déplacer la carte librement'
-              : 'Carte libre — cliquer pour suivre la position (centrer la carte)'
-          }
-          className={`map-btn map-btn--follow ${followMap ? 'map-btn--follow-on' : ''}`}
-          aria-pressed={followMap}
-        >
-          {followMap ? '●' : '○'}
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onClick}
-        title={titles[state]}
-        className="map-btn map-btn--locate"
-        style={{ color: colors[state] }}
-      >
-        {icons[state]}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="map-btn map-btn--locate"
+      style={{ color }}
+    >
+      {icon}
+    </button>
   )
 }
 
