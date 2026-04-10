@@ -42,6 +42,9 @@ interface ApLocation {
   confidence: number
   centroid_lat?: number
   centroid_lng?: number
+  /** Présent si la trilatération a été évitée ou rejetée (GPS / modèle RSSI). */
+  trilat_skipped?: string
+  sample_spread_m?: number
 }
 
 // ─── AP Location Markers ──────────────────────────────────────────────────────
@@ -87,6 +90,12 @@ function ApMarkersLayer({ locations, selectedBssid }: {
       })
 
       const confStr = `${Math.round(ap.confidence * 100)}%`
+      const spreadLine = ap.sample_spread_m != null
+        ? `Étendue échantillons : ~${ap.sample_spread_m} m<br/>`
+        : ''
+      const skipLine = ap.trilat_skipped
+        ? `<span style="color:#888">Trilat. : ${ap.trilat_skipped}</span><br/>`
+        : ''
       const popup = `
         <div style="font-family:monospace;font-size:12px;min-width:200px">
           <b style="color:${color}">${ap.ssid || '<hidden>'}</b><br/>
@@ -98,7 +107,8 @@ function ApMarkersLayer({ locations, selectedBssid }: {
           Méthode : ${ap.method}<br/>
           RSSI max : ${ap.best_rssi} dBm<br/>
           Points distincts : ${ap.points_used}<br/>
-          Confiance : ${confStr}
+          Confiance : ${confStr}<br/>
+          ${spreadLine}${skipLine}
         </div>
       `
 
@@ -233,12 +243,15 @@ interface HeatmapLayerProps {
   pollInterval: number
 }
 
-declare global {
-  interface Window {
-    L: typeof L & {
-      heatLayer: (points: HeatPoint[], opts: object) => L.Layer & { _heat: boolean }
-    }
+type HeatLayerFactory = (points: HeatPoint[], opts: object) => L.Layer
+
+/** Enregistré dans main.tsx via leaflet-heat-setup + import leaflet.heat (même L que react-leaflet). */
+function heatLayer(points: HeatPoint[], opts: object): L.Layer {
+  const fn = (L as unknown as { heatLayer?: HeatLayerFactory }).heatLayer
+  if (typeof fn !== 'function') {
+    throw new Error('leaflet.heat non chargé : vérifier main.tsx (imports leaflet-heat-setup puis leaflet-heat)')
   }
+  return fn(points, opts)
 }
 
 function HeatmapLayer({ bssid, bounds, pollInterval }: HeatmapLayerProps) {
@@ -255,7 +268,7 @@ function HeatmapLayer({ bssid, bounds, pollInterval }: HeatmapLayerProps) {
 
     if (data.length === 0) return
 
-    const heat = window.L.heatLayer(data, {
+    const heat = heatLayer(data, {
       radius: 35,
       blur: 25,
       maxZoom: 18,

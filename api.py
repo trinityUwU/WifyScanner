@@ -20,6 +20,13 @@ from paths import get_db_path
 
 DB_PATH = get_db_path()
 
+# Localisation AP : la trilatération RSSI suppose un milieu idéal ; avec peu de points ou
+# une faible étendue géographique, le centroïde pondéré est souvent plus stable.
+_MIN_SPREAD_M_FOR_TRILAT = 25.0   # sinon les distances déduites du RSSI sont peu contraintes
+_MAX_TRILAT_COST_PER_POINT = 8_000.0  # si le modèle log-distance colle mal, on garde le centroïde
+_RSSI_REF_DBM = -42.0  # RSSI typique à 1 m (plus réaliste que -30 pour du WiFi grand public)
+_PATH_LOSS_EXP = 2.8   # indoor / semi-urbain (2.0–4.0)
+
 app = FastAPI(title="WiFi Heatmap API", version="1.0.0")
 app.include_router(control_router)
 
@@ -139,6 +146,27 @@ def get_stats():
     }
 
 
+def _sample_spread_meters(pts: list[tuple]) -> float:
+    """Étendue max entre les points d'échantillonnage (m), projection locale plate."""
+    n = len(pts)
+    if n < 2:
+        return 0.0
+    lat0 = sum(lat for lat, _, _ in pts) / n
+    lng0 = sum(lng for _, lng, _ in pts) / n
+    m_lat = 111_320.0
+    m_lng = 111_320.0 * math.cos(math.radians(lat0))
+    xy = [((lat - lat0) * m_lat, (lng - lng0) * m_lng) for lat, lng, _ in pts]
+    best = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = xy[i][0] - xy[j][0]
+            dy = xy[i][1] - xy[j][1]
+            d = math.sqrt(dx * dx + dy * dy)
+            if d > best:
+                best = d
+    return best
+
+
 def _locate_ap(rows: list) -> dict:
     """
     Estime la position d'un AP à partir de mesures (lat, lng, rssi).
@@ -162,6 +190,7 @@ def _locate_ap(rows: list) -> dict:
 
     pts = list(cell.values())              # [(lat, lng, rssi), ...]
     n = len(pts)
+    spread_m = _sample_spread_meters(pts)
 
     # ── 2. Centroïde pondéré ──────────────────────────────────────────────────
     weights = [10 ** (rssi / 10) for _, _, rssi in pts]
@@ -180,14 +209,15 @@ def _locate_ap(rows: list) -> dict:
     }
 
     # ── 3. Trilatération (optionnelle, nécessite scipy) ────────────────────────
-    if n >= 3:
+    # Sans assez d'étendue géographique, les cercles RSSI ne croisent pas de façon fiable.
+    if n >= 3 and spread_m >= _MIN_SPREAD_M_FOR_TRILAT:
         try:
             from scipy.optimize import minimize  # type: ignore
             import numpy as np  # type: ignore
 
-            # Modèle log-distance : d = d0 * 10^((rssi0 - rssi) / (10*n_exp))
-            # On suppose rssi0 = -30 dBm à 1 m, n_exp = 2.5 (semi-urbain)
-            RSSI0, N_EXP, D0 = -30.0, 2.5, 1.0
+            # Modèle log-distance : d ≈ d0 * 10^((P_tx - RSSI) / (10 n))
+            # avec P_tx ≈ RSSI_ref à d0 (référence calibrée, toujours approximative en réel).
+            RSSI0, N_EXP, D0 = _RSSI_REF_DBM, _PATH_LOSS_EXP, 1.0
 
             # Conversion (lat,lng) → mètres relatifs (projection plate)
             lat0 = sum(lat for lat, _, _ in pts) / n
@@ -213,7 +243,9 @@ def _locate_ap(rows: list) -> dict:
             x0 = np.array([0.0, 0.0])
             res = minimize(cost, x0, method="Nelder-Mead",
                            options={"xatol": 0.5, "fatol": 0.5, "maxiter": 5000})
-            if res.success or res.fun < 1e6:
+            mean_cost = float(res.fun) / float(n)
+            fit_ok = (res.success or res.fun < 1e6) and mean_cost <= _MAX_TRILAT_COST_PER_POINT
+            if fit_ok:
                 t_lat = round(lat0 + res.x[0] / M_LAT, 7)
                 t_lng = round(lng0 + res.x[1] / M_LNG, 7)
                 result.update({
@@ -223,9 +255,18 @@ def _locate_ap(rows: list) -> dict:
                     "centroid_lat": round(c_lat, 7),
                     "centroid_lng": round(c_lng, 7),
                     "residual": round(float(res.fun), 2),
+                    "sample_spread_m": round(spread_m, 1),
                 })
+            else:
+                result["sample_spread_m"] = round(spread_m, 1)
+                result["trilat_skipped"] = "high_residual"
         except ImportError:
-            pass   # scipy absent → on garde le centroïde
+            result["sample_spread_m"] = round(spread_m, 1)
+            result["trilat_skipped"] = "scipy_unavailable"
+    else:
+        if n >= 3:
+            result["sample_spread_m"] = round(spread_m, 1)
+            result["trilat_skipped"] = "low_spread"
 
     return result
 
