@@ -9,10 +9,12 @@ Usage:
 
 import math
 import sqlite3
+import threading
+import urllib.request
 from contextlib import contextmanager
-from typing import Optional
-
 from io import BytesIO
+from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,9 +22,57 @@ from fastapi.responses import Response
 from PIL import Image
 
 from control import router as control_router
-from paths import get_db_path
+from paths import get_db_path, ROOT
 
 DB_PATH = get_db_path()
+
+# ─── Tuiles carte ─────────────────────────────────────────────────────────────
+
+TILES_DIR = ROOT / "tiles"
+
+# Source CDN (thème sombre, compatible dark UI).
+# Format : https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png
+_CDN_HOSTS = ["a", "b", "c", "d"]
+_CDN_TEMPLATE = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+_cdn_host_idx = 0
+_cdn_lock = threading.Lock()
+
+_TILE_PNG_BYTES: bytes | None = None  # cache mémoire tuile placeholder
+
+
+def _black_tile() -> bytes:
+    """256×256 fond sombre — identique à la couleur de fond de l'UI."""
+    global _TILE_PNG_BYTES
+    if _TILE_PNG_BYTES is None:
+        img = Image.new("RGB", (256, 256), (17, 19, 24))
+        buf = BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        _TILE_PNG_BYTES = buf.getvalue()
+    return _TILE_PNG_BYTES
+
+
+def _cdn_url(z: int, x: int, y: int) -> str:
+    global _cdn_host_idx
+    with _cdn_lock:
+        host = _CDN_HOSTS[_cdn_host_idx % len(_CDN_HOSTS)]
+        _cdn_host_idx += 1
+    return _CDN_TEMPLATE.format(s=host, z=z, x=x, y=y)
+
+
+def _fetch_and_cache_tile(z: int, x: int, y: int) -> bytes | None:
+    """Télécharge depuis le CDN, écrit sur disque, retourne les octets — ou None si échec."""
+    url = _cdn_url(z, x, y)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CyberAlpha/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = resp.read()
+        tile_path = TILES_DIR / str(z) / str(x) / f"{y}.png"
+        tile_path.parent.mkdir(parents=True, exist_ok=True)
+        tile_path.write_bytes(data)
+        return data
+    except Exception:
+        return None
+
 
 # Localisation AP : la trilatération RSSI suppose un milieu idéal ; avec peu de points ou
 # une faible étendue géographique, le centroïde pondéré est souvent plus stable.
@@ -41,31 +91,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Tuile PNG unique (fond sombre) — même image pour tout z/x/y, sert hors ligne (hotspot sans WAN).
-_TILE_PNG_BYTES: bytes | None = None
-
-
-def _get_tile_png_bytes() -> bytes:
-    global _TILE_PNG_BYTES
-    if _TILE_PNG_BYTES is None:
-        img = Image.new("RGB", (256, 256), (17, 19, 24))
-        buf = BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        _TILE_PNG_BYTES = buf.getvalue()
-    return _TILE_PNG_BYTES
-
-
 @app.get("/tiles/{z}/{x}/{y}.png")
-def map_tile_offline(z: int, x: int, y: int) -> Response:
+def map_tile(z: int, x: int, y: int) -> Response:
     """
-    Tuiles « carte » pour usage sans Internet (hotspot Pi seul).
-    Le navigateur charge ces PNG via le proxy /api ; pas d’appel CDN externe.
+    Tuiles carte :
+    1. Fichier local tiles/{z}/{x}/{y}.png  (pre-chargé via scripts/download-tiles.py)
+    2. Proxy CDN Carto dark + cache disque  (quand internet disponible)
+    3. Placeholder 256x256 fond sombre      (hotspot sans WAN et pas de cache)
     """
+    tile_path = TILES_DIR / str(z) / str(x) / f"{y}.png"
+    if tile_path.exists():
+        return Response(
+            content=tile_path.read_bytes(),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    data = _fetch_and_cache_tile(z, x, y)
+    if data is not None:
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
     return Response(
-        content=_get_tile_png_bytes(),
+        content=_black_tile(),
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "public, max-age=60"},
     )
+
 
 
 # ─── DB ───────────────────────────────────────────────────────────────────────

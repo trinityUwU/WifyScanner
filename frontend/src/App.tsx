@@ -9,13 +9,10 @@ const API = '/api'
 const POLL_SLOW = 10_000
 const POLL_LIVE = 3_000
 
-/** Dev : Carto (CDN). Build prod / Pi : tuiles PNG locales via l’API — fonctionne sans Internet (hotspot). */
-const MAP_TILE_URL = import.meta.env.DEV
-  ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-  : `${API}/tiles/{z}/{x}/{y}.png`
-const MAP_ATTRIBUTION = import.meta.env.DEV
-  ? '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-  : 'Fond carte local (sans Internet)'
+/** Tuiles servies par l'API locale — proxy+cache CDN si connecté, fond sombre sinon.
+ * Pré-télécharger une zone : python scripts/download-tiles.py --bbox ... */
+const MAP_TILE_URL = `${API}/tiles/{z}/{x}/{y}.png`
+const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
