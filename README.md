@@ -103,6 +103,8 @@ Le serveur Vite est configuré pour écouter sur **`0.0.0.0`** (toutes les inter
 3. Vérifier l’IP affichée par `hostname -I` (DHCP peut changer `192.168.x.x`)
 4. Téléphone et Pi sur le **même Wi‑Fi**, pas de VPN sur le téléphone
 
+**`vite: Permission denied` sur le Pi** : les binaires dans `node_modules/.bin/` n’ont pas le bit exécutable. Les scripts npm appellent désormais Vite via `node ./node_modules/vite/bin/vite.js`. Après `git pull`, refais `cd frontend && npm install` si besoin, puis `./start.sh`.
+
 **Script tout-en-un** (API + frontend, optionnellement le collecteur) :
 
 ```bash

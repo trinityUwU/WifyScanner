@@ -101,7 +101,8 @@ else
   (
     cd "$FRONTEND_DIR"
     export CYBERALPHA_WEB_PORT="$WEB_PORT"
-    exec npm run dev -- --host 0.0.0.0
+    # Évite « vite: Permission denied » si node_modules/.bin/vite n’est pas exécutable (Pi, FS)
+    exec node ./node_modules/vite/bin/vite.js --host 0.0.0.0
   ) > "$LOG_DIR/frontend.log" 2>&1 &
   echo $! > "$PID_FRONT"
   echo -e "  ${GRN}✓ Frontend lancé${RST}  (PID $(cat $PID_FRONT), port $WEB_PORT)"
