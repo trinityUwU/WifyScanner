@@ -87,13 +87,13 @@ Le script **`gps_diagnose.py`** affiche aussi des lignes **`SKY`** avec `satelli
    venv/bin/uvicorn api:app --host 0.0.0.0 --port 8001
    ```
 
-4. Frontend :
+4. Frontend (port **3780** par défaut, voir `CYBERALPHA_WEB_PORT`) :
 
    ```bash
    cd frontend && npm run dev -- --host 0.0.0.0
    ```
 
-Puis ouvrir l’URL affichée par Vite (depuis le PC ou le téléphone sur le même réseau).
+Puis ouvrir **`http://<IP>:3780`** (ou le port affiché par Vite) depuis le PC ou le téléphone.
 
 ## Panneau « Contrôle » (interface web)
 

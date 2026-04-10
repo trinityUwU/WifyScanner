@@ -6,6 +6,8 @@
 #
 # Arrêt propre : ./start.sh stop
 # Logs         : logs/api.log, logs/frontend.log, logs/collector.log
+#
+# Port UI (défaut 3780) : CYBERALPHA_WEB_PORT=4000 ./start.sh
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +19,9 @@ GRN='\033[0;32m'; YLW='\033[0;33m'; RED='\033[0;31m'; BLD='\033[1m'; RST='\033[0
 # ── Config ────────────────────────────────────────────────────────────────────
 VENV="$SCRIPT_DIR/venv"
 API_PORT=8001
+# Port UI Vite (voir frontend/vite.config.ts)
+WEB_PORT="${CYBERALPHA_WEB_PORT:-3780}"
+export CYBERALPHA_WEB_PORT="$WEB_PORT"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_API="$LOG_DIR/api.pid"
@@ -121,7 +126,7 @@ fi
 # ── URLs ──────────────────────────────────────────────────────────────────────
 IP=$(get_ip || echo "?")
 sleep 1   # laisser le frontend démarrer avant d'afficher le port
-FRONT_PORT=$(grep -oP 'Local:.+:(\d+)' "$LOG_DIR/frontend.log" 2>/dev/null | tail -1 | grep -oP '\d+$' || echo "5173")
+FRONT_PORT=$(grep -oP 'Local:.+:(\d+)' "$LOG_DIR/frontend.log" 2>/dev/null | tail -1 | grep -oP '\d+$' || echo "$WEB_PORT")
 
 echo ""
 echo -e "${BLD}━━━ Accès ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"

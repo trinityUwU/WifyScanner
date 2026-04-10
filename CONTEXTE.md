@@ -20,7 +20,7 @@
 
 ## Réseau (développement)
 
-- Frontend dev : `http://localhost:5173`, proxy Vite `/api` → `http://localhost:8001` (le **8000** est souvent pris par ChromaDB ou d’autres services).
+- Frontend dev : port **3780** par défaut (`http://localhost:3780`), surcharge : `CYBERALPHA_WEB_PORT=4000 npm run dev`. Proxy Vite `/api` → `http://localhost:8001`.
 - Accès téléphone : `uvicorn api:app --host 0.0.0.0 --port 8001` et `npm run dev -- --host` dans `frontend` ; ouvrir l’IP du Pi dans le navigateur du téléphone.
 
 ## GPS / gpsd (Arch)

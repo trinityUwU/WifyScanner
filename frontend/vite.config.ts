@@ -1,10 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+/** Port UI (dev + preview). Surcharge : CYBERALPHA_WEB_PORT=4000 npm run dev */
+const WEB_PORT = (() => {
+  const n = parseInt(process.env.CYBERALPHA_WEB_PORT ?? '3780', 10)
+  return n > 0 && n < 65536 ? n : 3780
+})()
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: WEB_PORT,
     proxy: {
       '/api': {
         target: 'http://localhost:8001',
@@ -12,5 +18,9 @@ export default defineConfig({
         timeout: 600_000,
       },
     },
+  },
+  preview: {
+    port: WEB_PORT,
+    host: true,
   },
 })
