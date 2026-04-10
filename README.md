@@ -94,7 +94,14 @@ Le script **`gps_diagnose.py`** affiche aussi des lignes **`SKY`** avec `satelli
    ```
 
 Puis ouvrir **`http://<IP>:3780`** (ou le port affiché par Vite) depuis le PC ou le téléphone.  
-Le serveur Vite est configuré pour écouter sur **`0.0.0.0`** (toutes les interfaces). Si l’accès réseau échoue, vérifie le pare-feu : `sudo ufw allow 3780/tcp` (ou équivalent).
+Le serveur Vite est configuré pour écouter sur **`0.0.0.0`** (toutes les interfaces).
+
+**`ERR_CONNECTION_REFUSED` depuis le téléphone** : ce n’est en général **pas** le pare-feu (sur Pi OS, `ufw` n’est souvent pas installé). Ça veut dire **rien n’écoute** sur le port ou **mauvaise IP**.
+
+1. Sur le Pi : `./start.sh` puis `bash scripts/diagnose-network.sh`
+2. Lire les logs : `tail -30 logs/frontend.log` (erreur npm / vite / port déjà pris)
+3. Vérifier l’IP affichée par `hostname -I` (DHCP peut changer `192.168.x.x`)
+4. Téléphone et Pi sur le **même Wi‑Fi**, pas de VPN sur le téléphone
 
 **Script tout-en-un** (API + frontend, optionnellement le collecteur) :
 
