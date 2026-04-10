@@ -311,6 +311,7 @@ case "$ACTION" in
         echo "  install   Installe hostapd/dnsmasq si NetworkManager absent (Bullseye)"
         echo "  start     Démarre le hotspot WiFi '$SSID'"
         echo "  stop      Arrête le hotspot"
+        echo "            (raccourci client WiFi : sudo bash scripts/hotspot-stop.sh)"
         echo "  status    Affiche l'état"
         echo "  ip        Affiche les adresses IPv4 de $IFACE (IP à utiliser pour SSH / web)"
         echo "  disable-autoconnect   Désactive le redémarrage auto du hotspot au boot (WiFi client OK)"
