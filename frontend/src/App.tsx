@@ -115,6 +115,116 @@ function ApMarkersLayer({ locations, selectedBssid }: {
   return null
 }
 
+// ─── Locate Me Button ─────────────────────────────────────────────────────────
+
+type LocateState = 'idle' | 'loading' | 'active' | 'error'
+
+function LocateButton() {
+  const map = useMap()
+  const markerRef = useRef<L.CircleMarker | null>(null)
+  const circleRef = useRef<L.Circle | null>(null)
+  const watchRef = useRef<number | null>(null)
+  const [state, setState] = useState<LocateState>('idle')
+
+  const stopWatch = () => {
+    if (watchRef.current !== null) {
+      navigator.geolocation.clearWatch(watchRef.current)
+      watchRef.current = null
+    }
+    markerRef.current?.remove(); markerRef.current = null
+    circleRef.current?.remove(); circleRef.current = null
+  }
+
+  const onPos = useCallback((pos: GeolocationPosition) => {
+    const { latitude: lat, longitude: lng, accuracy } = pos.coords
+    setState('active')
+
+    if (!markerRef.current) {
+      markerRef.current = L.circleMarker([lat, lng], {
+        radius: 8,
+        color: '#fff',
+        fillColor: '#4a9eff',
+        fillOpacity: 1,
+        weight: 2,
+      }).addTo(map)
+    } else {
+      markerRef.current.setLatLng([lat, lng])
+    }
+
+    if (!circleRef.current) {
+      circleRef.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#4a9eff',
+        fillColor: '#4a9eff',
+        fillOpacity: 0.08,
+        weight: 1,
+      }).addTo(map)
+    } else {
+      circleRef.current.setLatLng([lat, lng]).setRadius(accuracy)
+    }
+  }, [map])
+
+  const onClick = () => {
+    if (state === 'active') {
+      stopWatch()
+      setState('idle')
+      return
+    }
+    if (!navigator.geolocation) {
+      setState('error')
+      return
+    }
+    setState('loading')
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        onPos(pos)
+        map.flyTo([pos.coords.latitude, pos.coords.longitude], Math.max(map.getZoom(), 17), {
+          duration: 1.2,
+        })
+        watchRef.current = navigator.geolocation.watchPosition(onPos, () => {}, {
+          enableHighAccuracy: true,
+          maximumAge: 2000,
+        })
+      },
+      () => setState('error'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+
+  useEffect(() => () => stopWatch(), [])
+
+  const icons: Record<LocateState, string> = {
+    idle:    '◎',
+    loading: '…',
+    active:  '◉',
+    error:   '✕',
+  }
+  const colors: Record<LocateState, string> = {
+    idle:    'var(--text)',
+    loading: 'var(--text-muted)',
+    active:  'var(--blue)',
+    error:   'var(--red)',
+  }
+  const titles: Record<LocateState, string> = {
+    idle:    'Me localiser',
+    loading: 'Localisation…',
+    active:  'Suivi actif — cliquer pour arrêter',
+    error:   'Géolocalisation indisponible',
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={titles[state]}
+      className="map-btn map-btn--locate"
+      style={{ color: colors[state] }}
+    >
+      {icons[state]}
+    </button>
+  )
+}
+
 // ─── Heatmap Layer ────────────────────────────────────────────────────────────
 
 interface HeatmapLayerProps {
@@ -452,6 +562,7 @@ export default function App() {
               selectedBssid={selectedBssid}
             />
           )}
+          <LocateButton />
         </MapContainer>
 
         {/* Légende */}
