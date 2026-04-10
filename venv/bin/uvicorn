@@ -1,0 +1,10 @@
+#!/bin/sh
+'''exec' /home/trinity/.config/Claude/local-agent-mode-sessions/023d6953-9a13-49c3-ad28-761ead35b894/d6a580ef-8538-4df2-bc34-0c692fcf6255/local_55f7b6bc-40bc-4648-bb2b-1cdb1ef69298/outputs/wifi-heatmap/venv/bin/python3.11 "$0" "$@"
+' '''
+# -*- coding: utf-8 -*-
+import re
+import sys
+from uvicorn.main import main
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())

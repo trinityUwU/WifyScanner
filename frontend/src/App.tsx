@@ -1,0 +1,371 @@
+import { useState, useEffect, useCallback } from 'react'
+import { MapContainer, TileLayer, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import ControlPanel from './ControlPanel'
+import './App.css'
+
+const API = '/api'
+const POLL_SLOW = 10_000
+const POLL_LIVE = 3_000
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Network {
+  ssid: string
+  bssid: string
+  samples: number
+  avg_rssi: number
+  max_rssi: number
+  min_rssi: number
+  channel: number | null
+  encryption: string
+  last_seen: number
+}
+
+interface Stats {
+  total_points: number
+  unique_networks: number
+  bounds: { min_lat: number; max_lat: number; min_lng: number; max_lng: number } | null
+}
+
+type HeatPoint = [number, number, number] // lat, lng, intensity
+
+// ─── Heatmap Layer ────────────────────────────────────────────────────────────
+
+interface HeatmapLayerProps {
+  bssid: string | null
+  bounds: Stats['bounds']
+  pollInterval: number
+}
+
+declare global {
+  interface Window {
+    L: typeof L & {
+      heatLayer: (points: HeatPoint[], opts: object) => L.Layer & { _heat: boolean }
+    }
+  }
+}
+
+function HeatmapLayer({ bssid, bounds, pollInterval }: HeatmapLayerProps) {
+  const map = useMap()
+
+  const loadHeatmap = useCallback(async () => {
+    const url = bssid ? `${API}/heatmap?bssid=${encodeURIComponent(bssid)}` : `${API}/heatmap`
+    const data: HeatPoint[] = await fetch(url).then(r => r.json())
+
+    // Retirer l'ancienne couche heatmap
+    map.eachLayer(layer => {
+      if ((layer as any)._isHeatLayer) map.removeLayer(layer)
+    })
+
+    if (data.length === 0) return
+
+    const heat = window.L.heatLayer(data, {
+      radius: 35,
+      blur: 25,
+      maxZoom: 18,
+      max: 1.0,
+      gradient: {
+        0.0: '#0000ff',
+        0.3: '#00aaff',
+        0.5: '#00d88a',
+        0.7: '#f0a030',
+        1.0: '#ff4d6a',
+      },
+    }) as unknown as L.Layer & { _isHeatLayer: boolean }
+    heat._isHeatLayer = true
+    heat.addTo(map)
+
+    // Fit bounds sur les données ou les bounds de la stat
+    if (bounds) {
+      map.fitBounds([
+        [bounds.min_lat, bounds.min_lng],
+        [bounds.max_lat, bounds.max_lng],
+      ], { padding: [40, 40] })
+    }
+  }, [bssid, map, bounds])
+
+  useEffect(() => {
+    loadHeatmap()
+    const interval = setInterval(loadHeatmap, pollInterval)
+    return () => clearInterval(interval)
+  }, [loadHeatmap, pollInterval])
+
+  return null
+}
+
+// ─── Composants UI ────────────────────────────────────────────────────────────
+
+function rssiColor(rssi: number): string {
+  if (rssi >= -55) return 'var(--green)'
+  if (rssi >= -70) return 'var(--amber)'
+  return 'var(--red)'
+}
+
+function rssiLabel(rssi: number): string {
+  if (rssi >= -55) return 'Excellent'
+  if (rssi >= -65) return 'Bon'
+  if (rssi >= -75) return 'Moyen'
+  return 'Faible'
+}
+
+function encryptionBadge(enc: string) {
+  const color =
+    enc === 'OPEN' ? 'var(--red)' :
+    enc.includes('WPA2') ? 'var(--green)' :
+    'var(--amber)'
+  return (
+    <span style={{
+      fontSize: 10,
+      padding: '1px 5px',
+      borderRadius: 3,
+      border: `1px solid ${color}`,
+      color,
+      fontFamily: 'JetBrains Mono, monospace',
+    }}>
+      {enc}
+    </span>
+  )
+}
+
+function NetworkCard({
+  network,
+  selected,
+  onClick,
+}: {
+  network: Network
+  selected: boolean
+  onClick: () => void
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: '10px 12px',
+        marginBottom: 4,
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: selected ? 'var(--bg-surface)' : 'transparent',
+        border: `1px solid ${selected ? 'var(--blue)' : 'var(--border)'}`,
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 13, wordBreak: 'break-all' }}>
+          {network.ssid}
+        </span>
+        {encryptionBadge(network.encryption)}
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>
+        {network.bssid}
+      </div>
+      <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 12 }}>
+        <span style={{ color: rssiColor(network.avg_rssi) }}>
+          ⌀ {network.avg_rssi} dBm
+        </span>
+        <span style={{ color: 'var(--text-muted)' }}>
+          {network.samples} pts
+        </span>
+        {network.channel && (
+          <span style={{ color: 'var(--text-muted)' }}>
+            Ch {network.channel}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [view, setView] = useState<'heatmap' | 'control'>('heatmap')
+  const [liveHeatmap, setLiveHeatmap] = useState(true)
+  const [networks, setNetworks] = useState<Network[]>([])
+  const [stats, setStats] = useState<Stats>({ total_points: 0, unique_networks: 0, bounds: null })
+  const [selectedBssid, setSelectedBssid] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<'samples' | 'rssi'>('samples')
+
+  const pollMs = view === 'heatmap' && liveHeatmap ? POLL_LIVE : POLL_SLOW
+
+  const fetchData = useCallback(async () => {
+    const [nets, st] = await Promise.all([
+      fetch(`${API}/networks`).then(r => r.json()),
+      fetch(`${API}/stats`).then(r => r.json()),
+    ])
+    setNetworks(nets)
+    setStats(st)
+  }, [])
+
+  useEffect(() => {
+    if (view !== 'heatmap') return
+    fetchData()
+    const interval = setInterval(fetchData, pollMs)
+    return () => clearInterval(interval)
+  }, [fetchData, pollMs, view])
+
+  const filtered = networks
+    .filter(n =>
+      n.ssid.toLowerCase().includes(search.toLowerCase()) ||
+      n.bssid.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) =>
+      sortBy === 'samples' ? b.samples - a.samples : b.avg_rssi - a.avg_rssi
+    )
+
+  const selectedNetwork = networks.find(n => n.bssid === selectedBssid)
+
+  if (view === 'control') {
+    return (
+      <div className="app-shell">
+        <nav className="app-nav">
+          <button type="button" className="nav-tab" onClick={() => setView('heatmap')}>Heatmap</button>
+          <button type="button" className="nav-tab nav-tab--active">Contrôle</button>
+        </nav>
+        <div className="control-scroll">
+          <ControlPanel />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app-shell">
+      <nav className="app-nav">
+        <button type="button" className="nav-tab nav-tab--active">Heatmap</button>
+        <button type="button" className="nav-tab" onClick={() => setView('control')}>Contrôle</button>
+        <label className="nav-live">
+          <input type="checkbox" checked={liveHeatmap} onChange={e => setLiveHeatmap(e.target.checked)} />
+          Temps réel (~3s)
+        </label>
+      </nav>
+      <div className="app-layout">
+      {/* ── Sidebar ── */}
+      <aside className="sidebar">
+        {/* Header */}
+        <div className="sidebar-header">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 600, color: 'var(--green)' }}>WiFi Heatmap</h1>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>2.4GHz</span>
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            <span><b style={{ color: 'var(--text)' }}>{stats.total_points.toLocaleString()}</b> points</span>
+            <span><b style={{ color: 'var(--text)' }}>{stats.unique_networks}</b> réseaux</span>
+          </div>
+        </div>
+
+        {/* Search + sort */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+          <input
+            type="text"
+            placeholder="Rechercher SSID / BSSID..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="search-input"
+          />
+          <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+            {(['samples', 'rssi'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                className={`sort-btn ${sortBy === s ? 'active' : ''}`}
+              >
+                {s === 'samples' ? 'Points' : 'Signal'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Tous les réseaux */}
+        <div style={{ padding: '8px 12px' }}>
+          <div
+            onClick={() => setSelectedBssid(null)}
+            style={{
+              padding: '8px 12px',
+              marginBottom: 4,
+              borderRadius: 8,
+              cursor: 'pointer',
+              background: selectedBssid === null ? 'var(--bg-surface)' : 'transparent',
+              border: `1px solid ${selectedBssid === null ? 'var(--green)' : 'var(--border)'}`,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            Tous les réseaux
+          </div>
+        </div>
+
+        {/* Liste des réseaux */}
+        <div className="network-list">
+          {filtered.map(n => (
+            <NetworkCard
+              key={n.bssid}
+              network={n}
+              selected={selectedBssid === n.bssid}
+              onClick={() => setSelectedBssid(n.bssid === selectedBssid ? null : n.bssid)}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '16px 12px', textAlign: 'center' }}>
+              Aucun réseau trouvé
+            </div>
+          )}
+        </div>
+
+        {/* Info réseau sélectionné */}
+        {selectedNetwork && (
+          <div className="selected-info">
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>RÉSEAU SÉLECTIONNÉ</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>{selectedNetwork.ssid}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-muted)' }}>RSSI max</span>
+              <span style={{ color: rssiColor(selectedNetwork.max_rssi) }}>
+                {selectedNetwork.max_rssi} dBm ({rssiLabel(selectedNetwork.max_rssi)})
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}>RSSI min</span>
+              <span style={{ color: rssiColor(selectedNetwork.min_rssi) }}>
+                {selectedNetwork.min_rssi} dBm
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}>Canal</span>
+              <span>{selectedNetwork.channel ?? '?'}</span>
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* ── Map ── */}
+      <main className="map-container">
+        <MapContainer
+          center={[48.8566, 2.3522]}
+          zoom={15}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={true}
+        >
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+            maxZoom={19}
+          />
+          <HeatmapLayer bssid={selectedBssid} bounds={stats.bounds} pollInterval={pollMs} />
+        </MapContainer>
+
+        {/* Légende */}
+        <div className="legend">
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>SIGNAL</div>
+          <div style={{
+            height: 8,
+            borderRadius: 4,
+            background: 'linear-gradient(to right, #0000ff, #00aaff, #00d88a, #f0a030, #ff4d6a)',
+            marginBottom: 4,
+          }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
+            <span>Faible</span>
+            <span>Excellent</span>
+          </div>
+        </div>
+      </main>
+      </div>
+    </div>
+  )
+}
