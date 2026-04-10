@@ -135,6 +135,10 @@ function LocateButton() {
   const circleRef = useRef<L.Circle | null>(null)
   const watchRef = useRef<number | null>(null)
   const [state, setState] = useState<LocateState>('idle')
+  /** Si vrai, chaque mise à jour GPS recentre la carte ; sinon seul le marqueur bouge. */
+  const [followMap, setFollowMap] = useState(false)
+  const followMapRef = useRef(false)
+  followMapRef.current = followMap
 
   const stopWatch = () => {
     if (watchRef.current !== null) {
@@ -143,6 +147,7 @@ function LocateButton() {
     }
     markerRef.current?.remove(); markerRef.current = null
     circleRef.current?.remove(); circleRef.current = null
+    setFollowMap(false)
   }
 
   const onPos = useCallback((pos: GeolocationPosition) => {
@@ -171,6 +176,10 @@ function LocateButton() {
       }).addTo(map)
     } else {
       circleRef.current.setLatLng([lat, lng]).setRadius(accuracy)
+    }
+
+    if (followMapRef.current) {
+      map.setView([lat, lng], map.getZoom(), { animate: true, duration: 0.25 })
     }
   }, [map])
 
@@ -218,20 +227,37 @@ function LocateButton() {
   const titles: Record<LocateState, string> = {
     idle:    'Me localiser',
     loading: 'Localisation…',
-    active:  'Suivi actif — cliquer pour arrêter',
+    active:  'Arrêter le suivi GPS',
     error:   'Géolocalisation indisponible',
   }
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={titles[state]}
-      className="map-btn map-btn--locate"
-      style={{ color: colors[state] }}
-    >
-      {icons[state]}
-    </button>
+    <div className="map-locate-stack">
+      {state === 'active' && (
+        <button
+          type="button"
+          onClick={() => setFollowMap(f => !f)}
+          title={
+            followMap
+              ? 'Suivi carte actif — cliquer pour déplacer la carte librement'
+              : 'Carte libre — cliquer pour suivre la position (centrer la carte)'
+          }
+          className={`map-btn map-btn--follow ${followMap ? 'map-btn--follow-on' : ''}`}
+          aria-pressed={followMap}
+        >
+          {followMap ? '●' : '○'}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        title={titles[state]}
+        className="map-btn map-btn--locate"
+        style={{ color: colors[state] }}
+      >
+        {icons[state]}
+      </button>
+    </div>
   )
 }
 
@@ -241,6 +267,8 @@ interface HeatmapLayerProps {
   bssid: string | null
   bounds: Stats['bounds']
   pollInterval: number
+  /** Si faux, la carte ne se recentre plus sur les données (évite le « focus » permanent au re-poll). */
+  autoFitData: boolean
 }
 
 type HeatLayerFactory = (points: HeatPoint[], opts: object) => L.Layer
@@ -254,8 +282,14 @@ function heatLayer(points: HeatPoint[], opts: object): L.Layer {
   return fn(points, opts)
 }
 
-function HeatmapLayer({ bssid, bounds, pollInterval }: HeatmapLayerProps) {
+function HeatmapLayer({ bssid, bounds, pollInterval, autoFitData }: HeatmapLayerProps) {
   const map = useMap()
+  /** Dernière combinaison (filtre) pour laquelle on a fait un fitBounds — pas à chaque poll ni chaque bounds. */
+  const lastFitKeyRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (!autoFitData) lastFitKeyRef.current = undefined
+  }, [autoFitData])
 
   const loadHeatmap = useCallback(async () => {
     const url = bssid ? `${API}/heatmap?bssid=${encodeURIComponent(bssid)}` : `${API}/heatmap`
@@ -283,21 +317,28 @@ function HeatmapLayer({ bssid, bounds, pollInterval }: HeatmapLayerProps) {
     }) as unknown as L.Layer & { _isHeatLayer: boolean }
     heat._isHeatLayer = true
     heat.addTo(map)
-
-    // Fit bounds sur les données ou les bounds de la stat
-    if (bounds) {
-      map.fitBounds([
-        [bounds.min_lat, bounds.min_lng],
-        [bounds.max_lat, bounds.max_lng],
-      ], { padding: [40, 40] })
-    }
-  }, [bssid, map, bounds])
+  }, [bssid, map])
 
   useEffect(() => {
     loadHeatmap()
     const interval = setInterval(loadHeatmap, pollInterval)
     return () => clearInterval(interval)
   }, [loadHeatmap, pollInterval])
+
+  // Centrage sur les données : uniquement quand autoFitData est actif et à chaque changement de filtre (pas à chaque rafraîchissement des stats).
+  useEffect(() => {
+    if (!autoFitData || !bounds) return
+    const key = bssid ?? '__all__'
+    if (lastFitKeyRef.current === key) return
+    lastFitKeyRef.current = key
+    map.fitBounds(
+      [
+        [bounds.min_lat, bounds.min_lng],
+        [bounds.max_lat, bounds.max_lng],
+      ],
+      { padding: [40, 40] },
+    )
+  }, [autoFitData, bssid, bounds, map])
 
   return null
 }
@@ -389,6 +430,8 @@ function NetworkCard({
 export default function App() {
   const [view, setView] = useState<'heatmap' | 'control'>('heatmap')
   const [liveHeatmap, setLiveHeatmap] = useState(true)
+  /** Recentrer la carte sur l’emprise des données seulement au changement de filtre (pas en boucle). */
+  const [autoFitDataBounds, setAutoFitDataBounds] = useState(true)
   const [showApMarkers, setShowApMarkers] = useState(true)
   const [networks, setNetworks] = useState<Network[]>([])
   const [stats, setStats] = useState<Stats>({ total_points: 0, unique_networks: 0, bounds: null })
@@ -450,6 +493,10 @@ export default function App() {
         <label className="nav-live">
           <input type="checkbox" checked={liveHeatmap} onChange={e => setLiveHeatmap(e.target.checked)} />
           Temps réel (~3s)
+        </label>
+        <label className="nav-live" title="Décoche pour déplacer la carte sans qu’elle revienne sur les données à chaque mise à jour">
+          <input type="checkbox" checked={autoFitDataBounds} onChange={e => setAutoFitDataBounds(e.target.checked)} />
+          Vue auto (données)
         </label>
         <label className="nav-live">
           <input type="checkbox" checked={showApMarkers} onChange={e => setShowApMarkers(e.target.checked)} />
@@ -568,7 +615,12 @@ export default function App() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
             maxZoom={19}
           />
-          <HeatmapLayer bssid={selectedBssid} bounds={stats.bounds} pollInterval={pollMs} />
+          <HeatmapLayer
+            bssid={selectedBssid}
+            bounds={stats.bounds}
+            pollInterval={pollMs}
+            autoFitData={autoFitDataBounds}
+          />
           {showApMarkers && (
             <ApMarkersLayer
               locations={selectedBssid ? apLocations.filter(a => a.bssid === selectedBssid) : apLocations}

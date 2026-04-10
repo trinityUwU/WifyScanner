@@ -308,9 +308,36 @@
   background: rgba(20, 25, 35, 0.95);
 }
 
-.map-btn--locate {
+.map-locate-stack {
+  position: absolute;
+  z-index: 1000;
   bottom: 110px;
   right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* Les .map-btn sont en position absolute par défaut ; dans la pile on les aligne en flux. */
+.map-locate-stack .map-btn {
+  position: relative;
+  z-index: auto;
+}
+
+.map-btn--follow {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.map-btn--follow-on {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.map-btn--locate {
   width: 36px;
   height: 36px;
   font-size: 18px;
