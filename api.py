@@ -12,8 +12,12 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Optional
 
+from io import BytesIO
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from PIL import Image
 
 from control import router as control_router
 from paths import get_db_path
@@ -36,6 +40,32 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Tuile PNG unique (fond sombre) — même image pour tout z/x/y, sert hors ligne (hotspot sans WAN).
+_TILE_PNG_BYTES: bytes | None = None
+
+
+def _get_tile_png_bytes() -> bytes:
+    global _TILE_PNG_BYTES
+    if _TILE_PNG_BYTES is None:
+        img = Image.new("RGB", (256, 256), (17, 19, 24))
+        buf = BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        _TILE_PNG_BYTES = buf.getvalue()
+    return _TILE_PNG_BYTES
+
+
+@app.get("/tiles/{z}/{x}/{y}.png")
+def map_tile_offline(z: int, x: int, y: int) -> Response:
+    """
+    Tuiles « carte » pour usage sans Internet (hotspot Pi seul).
+    Le navigateur charge ces PNG via le proxy /api ; pas d’appel CDN externe.
+    """
+    return Response(
+        content=_get_tile_png_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # ─── DB ───────────────────────────────────────────────────────────────────────

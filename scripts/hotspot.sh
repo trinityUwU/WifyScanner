@@ -14,6 +14,10 @@
 # IP fixe du Pi sur le hotspot : voir HOTSPOT_IP (défaut 192.168.4.1/24).
 # Ce n’est pas 192.168.1.x — c’est le réseau de ta box quand le Pi y est client WiFi.
 # Vérifie avec : sudo bash scripts/hotspot.sh status   ou   ip -4 addr show wlan0
+#
+# Par défaut le hotspot ne se relance PAS au boot (autoconnect=no) pour que le Pi retrouve le WiFi maison.
+# Hotspot au boot (terrain) : PERSIST=1 sudo bash scripts/hotspot.sh start
+# Pi bloqué en AP : sudo bash scripts/hotspot.sh disable-autoconnect
 
 set -euo pipefail
 
@@ -76,9 +80,16 @@ nm_start() {
         nmcli connection modify "$SSID" ipv4.method shared
     fi
 
-    nmcli connection modify "$SSID" \
-        connection.autoconnect          yes \
-        connection.autoconnect-priority 10
+    # Ne pas activer au boot par défaut — sinon le Pi ne retrouve plus le WiFi maison.
+    if [[ "${PERSIST:-}" == "1" ]]; then
+        nmcli connection modify "$SSID" \
+            connection.autoconnect          yes \
+            connection.autoconnect-priority 10
+        info "Hotspot persistant au boot (PERSIST=1)."
+    else
+        nmcli connection modify "$SSID" connection.autoconnect no
+        info "Hotspot sans autoconnect — le Pi pourra refaire du WiFi client après reboot."
+    fi
 
     nmcli connection up "$SSID" || {
         error "Impossible d'activer la connexion '$SSID'. Vérifie : nmcli connection show $SSID"
@@ -98,6 +109,18 @@ nm_start() {
 nm_stop() {
     info "Arrêt du hotspot (NetworkManager)..."
     nmcli connection down "$SSID" 2>/dev/null && info "Hotspot '$SSID' arrêté." || warn "Hotspot non actif."
+    nmcli connection modify "$SSID" connection.autoconnect no 2>/dev/null || true
+}
+
+# Désactive l’autoconnect sur le profil hotspot (répare un Pi « bloqué » en AP au boot)
+nm_disable_autoconnect() {
+    if command -v nmcli &>/dev/null; then
+        nmcli connection modify "$SSID" connection.autoconnect no 2>/dev/null && \
+            info "Profil '$SSID' : autoconnect désactivé." || \
+            warn "Profil '$SSID' introuvable ou déjà sans autoconnect."
+    else
+        warn "nmcli absent."
+    fi
 }
 
 nm_status() {
@@ -278,6 +301,9 @@ case "$ACTION" in
     ip|show-ip)
         show_ip_cmd
         ;;
+    disable-autoconnect|fix-boot)
+        nm_disable_autoconnect
+        ;;
     help|--help|-h|*)
         echo ""
         echo -e "${BLD}Usage :${RST} sudo bash $0 [commande]"
@@ -287,6 +313,9 @@ case "$ACTION" in
         echo "  stop      Arrête le hotspot"
         echo "  status    Affiche l'état"
         echo "  ip        Affiche les adresses IPv4 de $IFACE (IP à utiliser pour SSH / web)"
+        echo "  disable-autoconnect   Désactive le redémarrage auto du hotspot au boot (WiFi client OK)"
+        echo ""
+        echo "  Hotspot persistant au boot (terrain) : PERSIST=1 sudo bash $0 start"
         echo ""
         echo "  SSID : $SSID  |  Mot de passe : $PASSWORD"
         echo ""

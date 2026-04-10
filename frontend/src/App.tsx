@@ -9,6 +9,14 @@ const API = '/api'
 const POLL_SLOW = 10_000
 const POLL_LIVE = 3_000
 
+/** Dev : Carto (CDN). Build prod / Pi : tuiles PNG locales via l’API — fonctionne sans Internet (hotspot). */
+const MAP_TILE_URL = import.meta.env.DEV
+  ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+  : `${API}/tiles/{z}/{x}/{y}.png`
+const MAP_ATTRIBUTION = import.meta.env.DEV
+  ? '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+  : 'Fond carte local (sans Internet)'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Network {
@@ -580,8 +588,8 @@ export default function App() {
           zoomControl={true}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+            url={MAP_TILE_URL}
+            attribution={MAP_ATTRIBUTION}
             maxZoom={19}
           />
           <HeatmapLayer

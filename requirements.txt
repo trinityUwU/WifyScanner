@@ -2,3 +2,4 @@ scapy>=2.5.0
 gpsdclient>=1.0.2
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
+pillow>=10.0.0
